@@ -1,0 +1,15 @@
+version: "3"
+
+services:
+  airflow-dev:
+    # platform: linux/aarch64
+    platform: linux/x86_64
+    build: docker
+    container_name: airflow-dev
+    ports:
+      - "80:8080"
+      - "443:443"
+    volumes:
+      - .dags:/root/dags
+      - .logs:/root/logs
+    # restart: unless-stopped

@@ -1,0 +1,10 @@
+lrwxr-xr-x     1 sungyong  admin     26 Mar  7  2022 pv -> ../Cellar/pv/1.6.20/bin/pv
+lrwxr-xr-x     1 sungyong  admin     39 Oct  9 10:32 pydoc3 -> ../Cellar/python@3.10/3.10.7/bin/pydoc3
+lrwxr-xr-x     1 sungyong  admin     42 Oct  9 10:32 pydoc3.10 -> ../Cellar/python@3.10/3.10.7/bin/pydoc3.10
+lrwxr-xr-x     1 sungyong  admin     40 Sep  7 16:42 pydoc3.9 -> ../Cellar/python@3.9/3.9.14/bin/pydoc3.9
+lrwxr-xr-x     1 sungyong  admin     40 Oct  9 10:32 python3 -> ../Cellar/python@3.10/3.10.7/bin/python3
+lrwxr-xr-x     1 sungyong  admin     47 Oct  9 10:32 python3-config -> ../Cellar/python@3.10/3.10.7/bin/python3-config
+lrwxr-xr-x     1 sungyong  admin     43 Oct  9 10:32 python3.10 -> ../Cellar/python@3.10/3.10.7/bin/python3.10
+lrwxr-xr-x     1 sungyong  admin     50 Oct  9 10:32 python3.10-config -> ../Cellar/python@3.10/3.10.7/bin/python3.10-config
+lrwxr-xr-x     1 sungyong  admin     41 Sep  7 16:42 python3.9 -> ../Cellar/python@3.9/3.9.14/bin/python3.9
+lrwxr-xr-x     1 sungyong  admin     48 Sep  7 16:42 python3.9-config -> ../Cellar/python@3.9/3.9.14/bin/python3.9-config

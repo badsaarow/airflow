@@ -1,0 +1,28 @@
+minio:
+  conn_type: aws
+  description: ''
+  extra: '{"host": "http://appwrite:9000", "aws_access_key_id": "cdss", "aws_secret_access_key":
+    "cdss_access_key"}'
+  host: ''
+  login: cdss
+  password: cdss-access-key
+  port: null
+  schema: ''
+postgres-etl:
+  conn_type: postgres
+  description: for annotation
+  extra: ''
+  host: postgres-etl
+  login: postgres
+  password: cdss1234
+  port: 5432
+  schema: tb_ext
+postgres-tb:
+  conn_type: postgres
+  description: thingsboard db
+  extra: ''
+  host: postgres-tb
+  login: postgres
+  password: postgres
+  port: 5432
+  schema: thingsboard
