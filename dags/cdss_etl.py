@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from typing import Any, Dict
 import pandas as pd
 import numpy as np
+import json
+from array import array
 from pandas import DataFrame
 from airflow.models.dag import DAG
 from airflow.decorators import dag, task
@@ -58,14 +60,71 @@ def upload_to_minio(local_file, s3_file):
         logging.error("Credentials not available")
         return False
 
-@task
+def convert_data_ts_val(x, y):
+    data_pb = track_pb2.Track().Data()
+    data_pb.ts=x
+    data_pb.val.append(y)
+    return data_pb
+
 def export_vital_file(device_id: str, case_id: str):
     logging.warn("export_vital_file  " + device_id + case_id)
+
+    hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+    sql_stmt = (
+        "select type, name, format, unit, srate, json_agg(ts order by ts asc) as ts, json_agg(val) as val"
+        " from track_per_caseid_type"
+        f" where device_id = '{device_id}'::UUID"
+        f" and case_id= '{case_id}'"
+        " group by type, name, format, unit, srate;"
+    )
+    logging.warn(sql_stmt)
+    df = hook.get_pandas_df(sql=sql_stmt)
+
+    tracks_pb = tracks_pb2.Tracks()
+    for (idx, row_series) in df.iterrows():
+        # print('Row Index label : ', idx)
+        df_p = pd.DataFrame({'val': row_series['val']})
+        df.at[idx , 'val'] =  np.concatenate(df_p['val'].values)
+        track_pb = track_pb2.Track()
+
+        track_pb.type = row_series['type']
+        track_pb.name = row_series['name']
+        track_pb.format = row_series['format']
+        track_pb.unit = row_series['unit']
+        if row_series['srate'] is not None:
+            track_pb.srate = int(row_series['srate'])
+
+        # ts:val 쌍을 만들어야 한다.
+        data = list(map(lambda x, y: convert_data_ts_val(x, y), row_series['ts'], df.at[idx , 'val']))
+        for (idx, datum) in enumerate(data):
+            track_pb.data.append(datum)
+        tracks_pb.tracks.append(track_pb)
+    # make protobuf
+    f = open(f'{device_id}_{case_id}.pb', "wb")
+    f.write(tracks_pb.SerializeToString())
+    f.close()
+
+def test_normalize():
+    arr2: str = "[[60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60]]"
+    "[[23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94], [23.94]]"
+
+    json_array2 = json.loads(arr2)
+    df_p = pd.DataFrame({'val': json_array2})
+    ft = np.concatenate(df_p['val'].values)
+    # print(ft)
+    # flat = pd.json_normalize(json_array2, max_level=0)
+    # print(flat)
+
+if __name__ == "__main__":
+    print('start test')
+    export_vital_file('130bc450-406b-11ed-8f01-cfef1303339c', '007832df11')
+    print('finish main')
+    # test_normalize()
 
 
 def get_device_case_names():
     logging.warn('get_device_case_names')
-    # 1. get device, case_id
+
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     sql_stmt = (
         "select device_id, case_id"
@@ -74,12 +133,6 @@ def get_device_case_names():
     logging.warn(sql_stmt)
     df = hook.get_pandas_df(sql=sql_stmt)
     return df
-    # case_names =  df.as_matrix()
-    # # case_names =  df.to_numpy()
-    # logging.warn(case_names)
-    # return case_names
-    # return case_names.tolist()
-
 
 
 def generate_task(**args):
@@ -196,7 +249,7 @@ with DAG(
         generate_track_per_caseid_type = PostgresOperator(
             task_id='generate_track_per_caseid_type',
             postgres_conn_id=POSTGRES_CONN_ID,
-            sql='''truncate table track_per_caseid_type;
+            sql='''-- truncate table track_per_caseid_type;
                 insert into track_per_caseid_type
                 select caseid.case_id, caseid.start_ts, caseid.end_ts, track.*
                 from caseid_start_to_end as caseid
@@ -206,8 +259,6 @@ with DAG(
             dag=dag,
         )
 
-        #truncate_device_track >> generate_device_track >>
-        # generate_raw_track >> generate_caseid_start_to_end >> generate_track_per_type >> generate_track_per_type_agg
         generate_raw_track >> generate_caseid_start_to_end >> generate_track_per_type >> generate_track_per_caseid_type
 
     with TaskGroup("upload_vital_file", tooltip="Tasks for update upload_vital_file") as upload_vital_file:
@@ -219,7 +270,7 @@ with DAG(
             dag=dag,
         )
 
-        start_export >> export_vital
+        start_export >> [export_vital]
 
     with TaskGroup("refresh_meta", tooltip="Tasks for update ETL_META") as refresh_meta:
         update_meta = PostgresOperator(
@@ -254,5 +305,4 @@ with DAG(
     end = DummyOperator(task_id="end")
 
     start >> duplicate_tb  >> upload_vital_file >> refresh_meta >> end
-    # start >> upload_vital_file >> refresh_meta >> end
-    # start >> duplicate_tb >> end
+
