@@ -32,10 +32,8 @@ s3 = boto3.client('s3', aws_access_key_id=ACCESS_KEY,
 
 
 import trackTypeRows_pb2
-import tracks_pb2
-import track_pb2
 
-POSTGRES_CONN_ID = 'postgres-etl'
+POSTGRES_CONN_ID = 'postgres-mg-etl'
 
 
 
@@ -60,14 +58,17 @@ def upload_to_minio(local_file, s3_file):
         logging.error("Credentials not available")
         return False
 
-def convert_data_ts_val(x, y):
-    data_pb = track_pb2.Track().Data()
-    data_pb.ts=x
-    data_pb.val.append(y)
-    return data_pb
-
 def export_vital_file(device_id: str, case_id: str):
     logging.warn("export_vital_file  " + device_id + case_id)
+
+    hook1 = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+    sql_stmt1 = (
+        "select name from device"
+        f" where id = '{device_id}'::UUID;"
+    )
+    logging.warn(sql_stmt1)
+    df1 = hook1.get_pandas_df(sql=sql_stmt1)
+    name = df1.iloc[0,0]
 
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     sql_stmt = (
@@ -80,28 +81,46 @@ def export_vital_file(device_id: str, case_id: str):
     logging.warn(sql_stmt)
     df = hook.get_pandas_df(sql=sql_stmt)
 
-    tracks_pb = tracks_pb2.Tracks()
+    print('df count: ', df['ts'].count(), df['ts'].count())
+    if df['ts'].count() > 0:
+        start_ts_list = df.iloc[0,5]
+    else:
+        return
+
+    if isinstance(start_ts_list, list):
+        start_ts = start_ts_list[0]
+    else:
+        start_ts = start_ts_list
+
+    print('start_ts', start_ts)
+    ts = datetime.fromtimestamp(int(start_ts)/1000)
+    start_str = ts.strftime('%Y%m%d_%H%M%S')
+
+    track_type_rows_pb = trackTypeRows_pb2.TrackTypeRows()
     for (idx, row_series) in df.iterrows():
         # print('Row Index label : ', idx)
         df_p = pd.DataFrame({'val': row_series['val']})
         df.at[idx , 'val'] =  np.concatenate(df_p['val'].values)
-        track_pb = track_pb2.Track()
+        track_type_row_pb = track_type_rows_pb.TrackTypeRow()
+        tag_pb = track_type_rows_pb.Tag()
+        tag_pb.key = ''
+        tag_pb.value = ''
 
-        track_pb.type = row_series['type']
-        track_pb.name = row_series['name']
-        track_pb.format = row_series['format']
-        track_pb.unit = row_series['unit']
-        if row_series['srate'] is not None:
-            track_pb.srate = int(row_series['srate'])
+        track_type_row_pb.type = row_series['type']
 
-        # ts:val 쌍을 만들어야 한다.
-        data = list(map(lambda x, y: convert_data_ts_val(x, y), row_series['ts'], df.at[idx , 'val']))
-        for (idx, datum) in enumerate(data):
-            track_pb.data.append(datum)
-        tracks_pb.tracks.append(track_pb)
+        for ts in row_series['ts']:
+            track_type_row_pb.ts.append(ts)
+
+        for v in df.at[idx , 'val']:
+            value_pb = track_type_row_pb.Value()
+            value_pb.v.append(v)
+            track_type_row_pb.val.append(value_pb)
+
+        track_type_rows_pb.tag.append(tag_pb)
+        track_type_rows_pb.track.append(track_type_row_pb)
     # make protobuf
-    f = open(f'{device_id}_{case_id}.pb', "wb")
-    f.write(tracks_pb.SerializeToString())
+    f = open(f'{start_str}_{name}.pb', "wb")
+    f.write(track_type_rows_pb.SerializeToString())
     f.close()
 
 def test_normalize():
@@ -185,6 +204,7 @@ def task_upload_vital_files(**context):
     # logging.info('tasks: ' + str(len(tasks)))
     return tasks
 
+
 with DAG(
     dag_id="cdss_etl",
     # start_date=datetime(2022, 10, 13),
@@ -195,86 +215,111 @@ with DAG(
 
     start = DummyOperator(task_id="start")
 
-    # with TaskGroup("duplicate_tb", tooltip="Tasks for duplicate") as duplicate_tb:
-    #     duplicate_device = PostgresOperator(
-    #         task_id='duplicate_device',
-    #         postgres_conn_id=POSTGRES_CONN_ID,
-    #         sql='''truncate table device;insert into device select id, name from thingsboard.device;''',
-    #         dag=dag,
-    #     )
+    with TaskGroup("duplicate_tb", tooltip="Tasks for duplicate") as duplicate_tb:
+        create_etl_meta = PostgresOperator(
+            task_id='create_etl_meta',
+            postgres_conn_id=POSTGRES_CONN_ID,
+            sql='''create table IF NOT EXISTS etl_meta
+                (
+                    device_id     uuid   not null
+                        constraint etl_meta_pk
+                            primary key,
+                    last_start_ts bigint not null,
+                    last_case_id  text   not null,
+                    device_name   text,
+                    last_end_ts   bigint not null
+                );
 
-    #     duplicate_ts_kv_dictionary = PostgresOperator(
-    #         task_id='duplicate_ts_kv_dictionary',
-    #         postgres_conn_id=POSTGRES_CONN_ID,
-    #         sql='''truncate table ts_kv_dictionary;insert into ts_kv_dictionary select key, key_id from thingsboard.ts_kv_dictionary;''',
-    #         dag=dag,
-    #     )
+                alter table etl_meta
+                    owner to postgres;
 
-    #     duplicate_device >> duplicate_ts_kv_dictionary
+                create index IF NOT EXISTS etl_meta_last_start_ts_index
+                    on etl_meta (last_start_ts desc);
 
-    # with TaskGroup("process_etl", tooltip="Tasks for ETL") as process_etl:
-    #     generate_raw_track = PostgresOperator(
-    #         task_id='generate_raw_track',
-    #         postgres_conn_id=POSTGRES_CONN_ID,
-    #         sql='''truncate table raw_track;
-    #                 insert into raw_track
-    #                 select entity_id as device_id, ts, json_v as track_data
-    #                 from thingsboard.ts_kv
-    #                 where key = (
-    #                     select key_id
-    #                     from ts_kv_dictionary
-    #                     where key = 'tracks'
-    #                     )
-    #                 and ts > (select case when max(last_start_ts) > 1 then max(last_start_ts) else 1648738800000 end last_ts from etl_meta);''',
-    #         dag=dag,
-    #     )
+                create index IF NOT EXISTS etl_meta_last_end_ts_index
+                    on etl_meta (last_end_ts desc);''',
+            dag=dag,
+        )
 
-    #     generate_caseid_start_to_end = PostgresOperator(
-    #         task_id='generate_caseid_start_to_end',
-    #         postgres_conn_id=POSTGRES_CONN_ID,
-    #         sql='''truncate table caseid_start_to_end;
-    #                 insert into caseid_start_to_end
-    #                 select entity_id as device_id, str_v as case_id, min(ts) as start_ts, max(ts) as end_ts
-    #                     from thingsboard.ts_kv
-    #                     where key = (select key_id
-    #                                 from ts_kv_dictionary
-    #                                 where key = 'caseid')
-    #                         and ts between (select min(ts) as start_ts from raw_track) and (select max(ts) as end_ts from raw_track)
-    #                     group by entity_id, case_id;''',
-    #         dag=dag,
-    #     )
+        duplicate_device = PostgresOperator(
+            task_id='duplicate_device',
+            postgres_conn_id=POSTGRES_CONN_ID,
+            sql="drop table if exists device_{{ ds_nodash }}; select id, name into device_{{ ds_nodash }} from thingsboard.device;",
+            dag=dag,
+        )
 
-    #     generate_track_per_type = PostgresOperator(
-    #         task_id='generate_track_per_type',
-    #         postgres_conn_id=POSTGRES_CONN_ID,
-    #         sql='''truncate table track_per_type;
-    #             insert into track_per_type
-    #             select device_id,
-    #                 json_array_elements(json_v)->>'type' as type,
-    #                 json_array_elements(json_v)->>'name' as name,
-    #                 json_array_elements(json_v)->>'format' as format,
-    #                 json_array_elements(json_v)->>'unit' as unit,
-    #                 json_array_elements(json_v)->>'srate' as srate,
-    #                 floor((json_array_elements(json_array_elements(json_v)->'data')->>'ts')::float * 1000)::bigint as ts,
-    #                 json_array_elements(json_array_elements(json_v)->'data')->'val' as val
-    #             from raw_track;''',
-    #         dag=dag,
-    #     )
+        duplicate_ts_kv_dictionary = PostgresOperator(
+            task_id='duplicate_ts_kv_dictionary',
+            postgres_conn_id=POSTGRES_CONN_ID,
+            sql="drop table if exists ts_kv_dictionary_{{ ds_nodash }};select key, key_id into ts_kv_dictionary_{{ ds_nodash }} from thingsboard.ts_kv_dictionary;",
+            dag=dag,
+        )
 
-    #     generate_track_per_caseid_type = PostgresOperator(
-    #         task_id='generate_track_per_caseid_type',
-    #         postgres_conn_id=POSTGRES_CONN_ID,
-    #         sql='''-- truncate table track_per_caseid_type;
-    #             insert into track_per_caseid_type
-    #             select caseid.case_id, caseid.start_ts, caseid.end_ts, track.*
-    #             from caseid_start_to_end as caseid
-    #             join track_per_type as track
-    #             on caseid.device_id = track.device_id
-    #             and track.ts between caseid.start_ts and caseid.end_ts;''',
-    #         dag=dag,
-    #     )
+        duplicate_device >> duplicate_ts_kv_dictionary
 
-    #     generate_raw_track >> generate_caseid_start_to_end >> generate_track_per_type >> generate_track_per_caseid_type
+    with TaskGroup("process_etl", tooltip="Tasks for ETL") as process_etl:
+        generate_raw_track = PostgresOperator(
+            task_id='generate_raw_track',
+            postgres_conn_id=POSTGRES_CONN_ID,
+            sql='''drop table if exists raw_track_{{ ds_nodash }};
+                    select entity_id as device_id, ts, json_v as track_data
+                    into raw_track_{{ ds_nodash }}
+                    from thingsboard.ts_kv
+                    where key = (
+                        select key_id
+                        from ts_kv_dictionary_{{ ds_nodash }}
+                        where key = 'tracks'
+                        )
+                    and ts > (select case when max(last_start_ts) > 1 then max(last_start_ts) else 1648738800000 end last_ts from etl_meta);''',
+            dag=dag,
+        )
+
+        generate_caseid_start_to_end = PostgresOperator(
+            task_id='generate_caseid_start_to_end',
+            postgres_conn_id=POSTGRES_CONN_ID,
+            sql='''drop table if exists caseid_start_to_end_{{ ds_nodash }};
+                    select entity_id as device_id, str_v as case_id, min(ts) as start_ts, max(ts) as end_ts
+                    into caseid_start_to_end_{{ ds_nodash }}
+                        from thingsboard.ts_kv
+                        where key = (select key_id
+                                    from ts_kv_dictionary
+                                    where key = 'caseid')
+                            and ts between (select min(ts) as start_ts from raw_track) and (select max(ts) as end_ts from raw_track)
+                        group by entity_id, case_id;''',
+            dag=dag,
+        )
+
+        generate_track_per_type = PostgresOperator(
+            task_id='generate_track_per_type',
+            postgres_conn_id=POSTGRES_CONN_ID,
+            sql='''drop table if exists track_per_type_{{ ds_nodash }};
+                    select device_id,
+                    json_array_elements(json_v)->>'type' as type,
+                    json_array_elements(json_v)->>'name' as name,
+                    json_array_elements(json_v)->>'format' as format,
+                    json_array_elements(json_v)->>'unit' as unit,
+                    json_array_elements(json_v)->>'srate' as srate,
+                    floor((json_array_elements(json_array_elements(json_v)->'data')->>'ts')::float * 1000)::bigint as ts,
+                    json_array_elements(json_array_elements(json_v)->'data')->'val' as val
+                into track_per_type_{{ ds_nodash }}
+                from raw_track;''',
+            dag=dag,
+        )
+
+        generate_track_per_caseid_type = PostgresOperator(
+            task_id='generate_track_per_caseid_type',
+            postgres_conn_id=POSTGRES_CONN_ID,
+            sql='''drop table if exists track_per_caseid_type_{{ ds_nodash }};
+                select caseid.case_id, caseid.start_ts, caseid.end_ts, track.*
+                into track_per_caseid_type_{{ ds_nodash }}
+                from caseid_start_to_end as caseid
+                join track_per_type as track
+                on caseid.device_id = track.device_id
+                and track.ts between caseid.start_ts and caseid.end_ts;''',
+            dag=dag,
+        )
+
+        generate_raw_track >> generate_caseid_start_to_end >> generate_track_per_type >> generate_track_per_caseid_type
 
     with TaskGroup("upload_vital_file", tooltip="Tasks for update upload_vital_file") as upload_vital_file:
         start_export = DummyOperator(task_id="start_export")
@@ -286,7 +331,6 @@ with DAG(
         )
 
         start_export >> export_vital
-        # start_export >> task_upload_vital_files
 
     with TaskGroup("refresh_meta", tooltip="Tasks for update ETL_META") as refresh_meta:
         update_meta = PostgresOperator(
@@ -321,5 +365,6 @@ with DAG(
     end = DummyOperator(task_id="end")
 
     # start >> process_etl >> duplicate_tb  >> upload_vital_file >> refresh_meta >> end
-    start >> upload_vital_file >> refresh_meta >> end
+    start >> process_etl >> duplicate_tb  >> refresh_meta >> end
+    # start >> upload_vital_file >> refresh_meta >> end
 

@@ -2,6 +2,9 @@
 
 ## Step
 
+. venv/bin/activate
+airflow tasks list cdss_etl
+
 ```sql
 select type, name, format, json_agg(ts order by ts asc) as ts, json_agg(val) as val
 from track_per_caseid_type

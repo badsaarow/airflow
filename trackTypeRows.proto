@@ -1,0 +1,19 @@
+syntax = "proto3";
+package cdsspackage;
+
+message TrackTypeRows {
+  message Tag {
+    string key = 1;
+    string value = 2;
+  }
+  message TrackTypeRow {
+    string type = 1;
+    repeated double ts = 2;
+    message Value {
+      repeated double v = 3;
+    }
+    repeated Value val = 4;
+  }
+  repeated Tag tag = 1;
+  repeated TrackTypeRow track = 2;
+}

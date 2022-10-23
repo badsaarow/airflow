@@ -1,0 +1,19 @@
+# airflow connections import connections.yaml
+postgres-mg-etl:
+  conn_type: postgres
+  description: for annotation
+  extra: ''
+  host: 100.125.84.40
+  login: postgres
+  password: postgres
+  port: 5432
+  schema: tb_ext
+postgres-mg-tb:
+  conn_type: postgres
+  description: thingsboard db
+  extra: ''
+  host: 100.125.84.40
+  login: postgres
+  password: postgres
+  port: 5432
+  schema: thingsboard
