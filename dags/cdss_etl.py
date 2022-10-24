@@ -5,6 +5,7 @@ from typing import Any, Dict
 import pandas as pd
 import numpy as np
 import json
+import re
 from array import array
 from pandas import DataFrame
 from airflow.models.dag import DAG
@@ -63,17 +64,18 @@ def export_vital_file(device_id: str, case_id: str):
 
     hook1 = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     sql_stmt1 = (
-        "select name from device"
+        "select name from device_20221023"
         f" where id = '{device_id}'::UUID;"
     )
     logging.warn(sql_stmt1)
     df1 = hook1.get_pandas_df(sql=sql_stmt1)
-    name = df1.iloc[0,0]
+    name = str(df1.iloc[0,0])
+    name= name.replace('/', '-')
 
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     sql_stmt = (
         "select type, name, format, unit, srate, json_agg(ts order by ts asc) as ts, json_agg(val) as val"
-        " from track_per_caseid_type"
+        " from track_per_caseid_type_20221023"
         f" where device_id = '{device_id}'::UUID"
         f" and case_id= '{case_id}'"
         " group by type, name, format, unit, srate;"
@@ -100,7 +102,13 @@ def export_vital_file(device_id: str, case_id: str):
     for (idx, row_series) in df.iterrows():
         # print('Row Index label : ', idx)
         df_p = pd.DataFrame({'val': row_series['val']})
-        df.at[idx , 'val'] =  np.concatenate(df_p['val'].values)
+        if len(df_p.shape) == 0 or len(df_p['val'].shape) == 0 or len(df_p['val'].values.shape) == 0:
+            continue
+        print(len(df_p.shape), len(df_p['val'].shape), len(df_p['val'].values.shape))
+        try:
+            df.at[idx , 'val'] =  np.concatenate(df_p['val'].values)
+        except:
+            continue
         track_type_row_pb = track_type_rows_pb.TrackTypeRow()
         tag_pb = track_type_rows_pb.Tag()
         tag_pb.key = ''
@@ -137,7 +145,7 @@ def get_device_case_names():
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     sql_stmt = (
         "select device_id, case_id"
-        " from caseid_start_to_end;"
+        " from caseid_start_to_end_20221023;"
     )
     # logging.warn(sql_stmt)
     df = hook.get_pandas_df(sql=sql_stmt)
@@ -255,7 +263,7 @@ with DAG(
             dag=dag,
         )
 
-        duplicate_device >> duplicate_ts_kv_dictionary
+        create_etl_meta >> duplicate_device >> duplicate_ts_kv_dictionary
 
     with TaskGroup("process_etl", tooltip="Tasks for ETL") as process_etl:
         generate_raw_track = PostgresOperator(
@@ -282,9 +290,9 @@ with DAG(
                     into caseid_start_to_end_{{ ds_nodash }}
                         from thingsboard.ts_kv
                         where key = (select key_id
-                                    from ts_kv_dictionary
+                                    from ts_kv_dictionary_{{ ds_nodash }}
                                     where key = 'caseid')
-                            and ts between (select min(ts) as start_ts from raw_track) and (select max(ts) as end_ts from raw_track)
+                            and ts between (select min(ts) as start_ts from raw_track_{{ ds_nodash}}) and (select max(ts) as end_ts from raw_track_{{ ds_nodash }})
                         group by entity_id, case_id;''',
             dag=dag,
         )
@@ -294,15 +302,15 @@ with DAG(
             postgres_conn_id=POSTGRES_CONN_ID,
             sql='''drop table if exists track_per_type_{{ ds_nodash }};
                     select device_id,
-                    json_array_elements(json_v)->>'type' as type,
-                    json_array_elements(json_v)->>'name' as name,
-                    json_array_elements(json_v)->>'format' as format,
-                    json_array_elements(json_v)->>'unit' as unit,
-                    json_array_elements(json_v)->>'srate' as srate,
-                    floor((json_array_elements(json_array_elements(json_v)->'data')->>'ts')::float * 1000)::bigint as ts,
-                    json_array_elements(json_array_elements(json_v)->'data')->'val' as val
+                    json_array_elements(track_data)->>'type' as type,
+                    json_array_elements(track_data)->>'name' as name,
+                    json_array_elements(track_data)->>'format' as format,
+                    json_array_elements(track_data)->>'unit' as unit,
+                    json_array_elements(track_data)->>'srate' as srate,
+                    floor((json_array_elements(json_array_elements(track_data)->'data')->>'ts')::float * 1000)::bigint as ts,
+                    json_array_elements(json_array_elements(track_data)->'data')->'val' as val
                 into track_per_type_{{ ds_nodash }}
-                from raw_track;''',
+                from raw_track_{{ ds_nodash }};''',
             dag=dag,
         )
 
@@ -312,10 +320,26 @@ with DAG(
             sql='''drop table if exists track_per_caseid_type_{{ ds_nodash }};
                 select caseid.case_id, caseid.start_ts, caseid.end_ts, track.*
                 into track_per_caseid_type_{{ ds_nodash }}
-                from caseid_start_to_end as caseid
-                join track_per_type as track
+                from caseid_start_to_end_{{ ds_nodash }} as caseid
+                join track_per_type_{{ ds_nodash }} as track
                 on caseid.device_id = track.device_id
                 and track.ts between caseid.start_ts and caseid.end_ts;''',
+            dag=dag,
+        )
+
+        generate_device_case = PostgresOperator(
+            task_id='generate_device_case',
+            postgres_conn_id=POSTGRES_CONN_ID,
+            # sql='''drop table if exists device_case_{{ ds_nodash }};
+            #         select device_id, case_id, min(ts) as start_ts, max(ts) as end_ts
+            #         into device_case_{{ ds_nodash }}
+            #         from track_per_caseid_type_{{ ds_nodash }}
+            #         group by device_id, case_id;''',
+            sql='''drop table if exists device_case_20221023;
+                    select device_id, case_id, min(ts) as start_ts, max(ts) as end_ts
+                    into device_case_20221023
+                    from track_per_caseid_type_20221023
+                    group by device_id, case_id;''',
             dag=dag,
         )
 
@@ -340,7 +364,8 @@ with DAG(
                     set last_case_id = d.case_id,
                     last_start_ts = d.start_ts,
                     last_end_ts = d.end_ts
-                FROM device_track as d
+                -- FROM device_case_{{ ds_nodash }} as d
+                FROM device_case_20221023 as d
                 WHERE em.device_id = d.device_id;''',
             dag=dag,
         )
@@ -351,11 +376,11 @@ with DAG(
             sql='''INSERT INTO  etl_meta(device_id, last_case_id, last_start_ts, last_end_ts, device_name)
                     select device_id, case_id as last_case_id, start_ts as last_start_ts, end_ts as last_end_ts, d.name as device_name
                     from (select device_id, case_id, start_ts, end_ts, rank() OVER (PARTITION BY device_id ORDER BY start_ts DESC) as rk
-                        from device_track
+                        from device_case_20221023
                         where device_id not in (select device_id from etl_meta)
                         group by device_id, case_id, start_ts, end_ts
                         order by device_id, start_ts desc) as dt
-                        join thingsboard.device as d on dt.device_id = d.id
+                        join device_20221023 as d on dt.device_id = d.id
                     where rk = 1;''',
             dag=dag,
         )

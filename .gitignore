@@ -1,2 +1,5 @@
-bin/
 lib/
+*.pb
+*.pb.tgz
+bin/
+logs/
