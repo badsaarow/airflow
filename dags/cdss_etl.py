@@ -18,44 +18,35 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.utils.dates import days_ago
 from airflow.utils.task_group import TaskGroup
 from google.protobuf import json_format
-
-# s3 upload requires boto dependency
-import boto3
-from botocore.exceptions import NoCredentialsError
+from minio import Minio
+from minio.error import S3Error
 
 ACCESS_KEY = 'ysKyN2stJ0a53uqo'
 SECRET_KEY = 'wRBfUxNBcP5SZTpeNBpehVA85gZjrQba'
-AWS_BUCKET_NAME = 'cdss-bucket'
-AWS_BUCKET_REGION = 'ap-northeast-2'
+BUCKET_NAME = 'cdss-bucket'
+BUCKET_REGION = 'ap-northeast-2'
 
-s3 = boto3.client('s3', aws_access_key_id=ACCESS_KEY,
-                  aws_secret_access_key=SECRET_KEY, region_name=AWS_BUCKET_REGION)
-
+minio_client = Minio(
+        "appwrite.stg.zt1.huinnoaim.com:9000",
+        access_key=ACCESS_KEY,
+        secret_key=SECRET_KEY,
+        secure=False
+    )
 
 import trackTypeRows_pb2
 
 POSTGRES_CONN_ID = 'postgres-mg-etl'
-PROTO_FILE = 'dags/trackTypeRows.proto'
+PROTO_FILE = 'trackTypeRows.proto'
 EUMC_MIG_DATE = '20221023'
 
 def upload_to_minio(local_file, s3_file):
-    """
-    Uploads a file into a S3 bucket.
-    :param local_file: local file to upload to S3.
-    :param s3_file: file path in the s3 bucket.
-    :return: True if upload was successful.
-    """
-
     logging.warning("Uploading file " + s3_file)
     try:
-        s3.upload_file(local_file, AWS_BUCKET_NAME, s3_file)
+        minio_client.fput_object(BUCKET_NAME, s3_file, local_file)
         logging.warning(s3_file + " uploaded successfully")
         return True
-    except FileNotFoundError:
-        logging.error(s3_file + " file was not found")
-        return False
-    except NoCredentialsError:
-        logging.error("Credentials not available")
+    except S3Error as ex:
+        logging.error(s3_file, ex)
         return False
 
 def get_uploaded():
@@ -70,7 +61,17 @@ def is_uploaded(str_ts: str):
     return True
 
 def mk_tgz(src: str):
-    os.system(f'cp {PROTO_FILE} /tmp/{src}/ && mv {src}.pb /tmp/{src}/ && cd /tmp/{src}/ && tar -czvf {src}.tgz .')
+    logging.debug('mk_tgz: ' + src)
+    cmd = (
+        f"rm -rf /tmp/{src} "
+        f"&& mkdir -p /tmp/{src} "
+        f"&& cp {PROTO_FILE} /tmp/{src}/ "
+        f"&& mv {src}.pb /tmp/{src}/ "
+        f"&& cd /tmp/{src}/ "
+        f"&& tar -czvf {src}.tgz {PROTO_FILE} {src}.pb"
+    )
+    print(cmd)
+    os.system(cmd)
 
 def export_vital_file(case: array):
     device_id=case[0]
@@ -123,6 +124,7 @@ def export_vital_file(case: array):
     print('start_ts', start_ts)
     ts = datetime.fromtimestamp(int(start_ts)/1000)
     start_str = ts.strftime('%Y%m%d_%H%M%S')
+    s3_file = ts.strftime('%Y/%m/%d/')
     if is_uploaded(start_str):
         print('already uploaded: ' + start_str)
         return
@@ -157,13 +159,14 @@ def export_vital_file(case: array):
         track_type_rows_pb.track.append(track_type_row_pb)
     # make protobuf
     pb_filename = f'{start_str}_{name}'
+    s3_file += pb_filename + '.tgz'
+    print(s3_file)
     f = open(f'{pb_filename}.pb', "wb")
     f.write(track_type_rows_pb.SerializeToString())
     f.close()
 
     mk_tgz(pb_filename)
-    s3_filename = ts.strftime('%Y/%m/%d/') + f'{pb_filename}.tgz'
-    upload_to_minio(f'/tmp/{pb_filename}/{pb_filename}.tgz', s3_filename)
+    upload_to_minio(f'/tmp/{pb_filename}/{pb_filename}.tgz', s3_file)
 
 def test_normalize():
     arr2: str = "[[60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60]]"
@@ -179,7 +182,7 @@ def get_postgres_cases(last_sync_date: str):
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     sql_stmt = (
         "select device_id, case_id"
-        f" from caseid_start_to_end_'{last_sync_date};"
+        f" from caseid_start_to_end_{last_sync_date};"
     )
     # logging.warning(sql_stmt)
     df = hook.get_pandas_df(sql=sql_stmt)
@@ -189,35 +192,10 @@ def get_postgres_cases(last_sync_date: str):
     # 'device_id: ' + str(case[0]) + ' case_id: ' + str(case[1])
     return cases
 
-def get_device_case_names():
-    # logging.warning('get_device_case_names')
-
-    hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
-    # sql_stmt = (
-    #     "select device_id, case_id"
-    #     " from caseid_start_to_end_{{ ds_nodash }};"
-    # )
-    sql_stmt = (
-        "select device_id, case_id"
-        f" from caseid_start_to_end_{EUMC_MIG_DATE};"
-    )
-    # logging.warning(sql_stmt)
-    df = hook.get_pandas_df(sql=sql_stmt)
-    return df
-
 def manual_pb_gen():
-    df = get_device_case_names()
-    print('total: ' + str(len(df)))
-
-    # [1673 rows x 2 columns]
-    arr: np.ndarray = df.to_numpy()
-    cases =  list(arr)
-
-    for case in cases:
-        if case[0] is  None or case[1] is None:
-            continue
-        print('device_id: ' + str(case[0]) + ' case_id: ' + str(case[1]))
-        export_vital_file(case[0], case[1])
+    cases = ['614d1c80-c10a-11ec-b55c-77808ef42464', '000c062c8d'] #get_postgres_cases(EUMC_MIG_DATE)
+    print('total: ', cases)
+    export_vital_file(cases)
 
 
 if __name__ == "__main__":
