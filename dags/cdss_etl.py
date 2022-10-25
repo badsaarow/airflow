@@ -23,10 +23,10 @@ from google.protobuf import json_format
 import boto3
 from botocore.exceptions import NoCredentialsError
 
-ACCESS_KEY = os.getenv('AWS_ACCESS_KEY')
-SECRET_KEY = os.getenv('AWS_SECRET_KEY')
-AWS_BUCKET_NAME = os.getenv('AWS_BUCKET_NAME')
-AWS_BUCKET_REGION = os.getenv('AWS_S3_REGION')
+ACCESS_KEY = 'ysKyN2stJ0a53uqo'
+SECRET_KEY = 'wRBfUxNBcP5SZTpeNBpehVA85gZjrQba'
+AWS_BUCKET_NAME = 'cdss-bucket'
+AWS_BUCKET_REGION = 'ap-northeast-2'
 
 s3 = boto3.client('s3', aws_access_key_id=ACCESS_KEY,
                   aws_secret_access_key=SECRET_KEY, region_name=AWS_BUCKET_REGION)
@@ -35,10 +35,9 @@ s3 = boto3.client('s3', aws_access_key_id=ACCESS_KEY,
 import trackTypeRows_pb2
 
 POSTGRES_CONN_ID = 'postgres-mg-etl'
+PROTO_FILE = 'dags/trackTypeRows.proto'
+EUMC_MIG_DATE = '20221023'
 
-
-
-@task
 def upload_to_minio(local_file, s3_file):
     """
     Uploads a file into a S3 bucket.
@@ -47,10 +46,10 @@ def upload_to_minio(local_file, s3_file):
     :return: True if upload was successful.
     """
 
-    logging.warn("Uploading file " + s3_file)
+    logging.warning("Uploading file " + s3_file)
     try:
         s3.upload_file(local_file, AWS_BUCKET_NAME, s3_file)
-        logging.warn(s3_file + " uploaded successfully")
+        logging.warning(s3_file + " uploaded successfully")
         return True
     except FileNotFoundError:
         logging.error(s3_file + " file was not found")
@@ -70,28 +69,44 @@ def is_uploaded(str_ts: str):
         return False
     return True
 
-def export_vital_file(device_id: str, case_id: str):
-    logging.warn("export_vital_file  " + device_id + case_id)
+def mk_tgz(src: str):
+    os.system(f'cp {PROTO_FILE} /tmp/{src}/ && mv {src}.pb /tmp/{src}/ && cd /tmp/{src}/ && tar -czvf {src}.tgz .')
+
+def export_vital_file(case: array):
+    device_id=case[0]
+    case_id=case[1]
+    logging.warning("export_vital_file  " + device_id + case_id)
 
     hook1 = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+    # sql_stmt1 = (
+    #     "select name from device_{{ ds_nodash }}"
+    #     f" where id = '{device_id}'::UUID;"
+    # )
     sql_stmt1 = (
-        "select name from device_20221023"
+        f"select name from device_{EUMC_MIG_DATE}"
         f" where id = '{device_id}'::UUID;"
     )
-    logging.warn(sql_stmt1)
+    logging.warning(sql_stmt1)
     df1 = hook1.get_pandas_df(sql=sql_stmt1)
     name = str(df1.iloc[0,0])
     name= name.replace('/', '-')
 
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+    # sql_stmt = (
+    #     "select type, name, format, unit, srate, json_agg(ts order by ts asc) as ts, json_agg(val) as val"
+    #     " from track_per_caseid_type_{{ ds_nodash }}"
+    #     f" where device_id = '{device_id}'::UUID"
+    #     f" and case_id= '{case_id}'"
+    #     " group by type, name, format, unit, srate;"
+    # )
     sql_stmt = (
         "select type, name, format, unit, srate, json_agg(ts order by ts asc) as ts, json_agg(val) as val"
-        " from track_per_caseid_type_20221023"
+        f" from track_per_caseid_type_{EUMC_MIG_DATE}"
         f" where device_id = '{device_id}'::UUID"
         f" and case_id= '{case_id}'"
         " group by type, name, format, unit, srate;"
     )
-    logging.warn(sql_stmt)
+    logging.warning(sql_stmt)
     df = hook.get_pandas_df(sql=sql_stmt)
 
     print('df count: ', df['ts'].count(), df['ts'].count())
@@ -141,9 +156,14 @@ def export_vital_file(device_id: str, case_id: str):
         track_type_rows_pb.tag.append(tag_pb)
         track_type_rows_pb.track.append(track_type_row_pb)
     # make protobuf
-    f = open(f'{start_str}_{name}.pb', "wb")
+    pb_filename = f'{start_str}_{name}'
+    f = open(f'{pb_filename}.pb', "wb")
     f.write(track_type_rows_pb.SerializeToString())
     f.close()
+
+    mk_tgz(pb_filename)
+    s3_filename = ts.strftime('%Y/%m/%d/') + f'{pb_filename}.tgz'
+    upload_to_minio(f'/tmp/{pb_filename}/{pb_filename}.tgz', s3_filename)
 
 def test_normalize():
     arr2: str = "[[60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60], [60]]"
@@ -153,15 +173,35 @@ def test_normalize():
     df_p = pd.DataFrame({'val': json_array2})
     ft = np.concatenate(df_p['val'].values)
 
-def get_device_case_names():
-    # logging.warn('get_device_case_names')
-
+@task
+def get_postgres_cases(last_sync_date: str):
+    # format: yyyymmddhh
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     sql_stmt = (
         "select device_id, case_id"
-        " from caseid_start_to_end_20221023;"
+        f" from caseid_start_to_end_'{last_sync_date};"
     )
-    # logging.warn(sql_stmt)
+    # logging.warning(sql_stmt)
+    df = hook.get_pandas_df(sql=sql_stmt)
+    # [ n rows x 2 columns]
+    arr: np.ndarray = df.to_numpy()
+    cases =  list(arr)
+    # 'device_id: ' + str(case[0]) + ' case_id: ' + str(case[1])
+    return cases
+
+def get_device_case_names():
+    # logging.warning('get_device_case_names')
+
+    hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+    # sql_stmt = (
+    #     "select device_id, case_id"
+    #     " from caseid_start_to_end_{{ ds_nodash }};"
+    # )
+    sql_stmt = (
+        "select device_id, case_id"
+        f" from caseid_start_to_end_{EUMC_MIG_DATE};"
+    )
+    # logging.warning(sql_stmt)
     df = hook.get_pandas_df(sql=sql_stmt)
     return df
 
@@ -188,51 +228,10 @@ if __name__ == "__main__":
     manual_pb_gen()
     print('finish main')
 
-
-def generate_task(**args):
-    # logging.info(args)
-    device_id:str = args['device_id']
-    case_id:str = args['case_id']
-    idx:str = args['idx']
-    # logging.warn("generate_tasks " + device_id + case_id)
-    export_task = PythonOperator(
-       task_id=f"'task_export_vital_file_{idx}'",
-       python_callable=export_vital_file,
-       op_args='{"device_id": {device_id}, "case_id": {case_id}}',
-       dag=dag,
-    )
-    return export_task
-
-def task_upload_vital_files(**context):
-    dag_instance = context['dag']
-    context = get_current_context()
-    df = get_device_case_names()
-    # [1673 rows x 2 columns]
-    arr: np.ndarray = df.to_numpy()
-    cases =  list(arr)
-    # logging.warn('length: ' + str(len(cases)))
-
-    tasks = []
-    idx = 0
-    for case in cases:
-        idx += 101
-        if case[0] is  None or case[1] is None:
-            continue
-        device_id: str = case[0]
-        case_id: str = case[1]
-        # logging.info('device_id: ' + str(device_id) + ' case_id: ' + str(case_id))
-        task = generate_task(device_id=device_id, case_id=case_id, idx=idx, dag=dag_instance)
-        tasks.append(task)
-
-    # logging.info('tasks: ' + str(len(tasks)))
-    return tasks
-
-
 with DAG(
     dag_id="cdss_etl",
-    # start_date=datetime(2022, 10, 13),
     start_date=days_ago(1),
-    schedule_interval=timedelta(minutes=120),
+    schedule_interval=timedelta(hours=24),
     tags=["cdss"]
 ) as dag:
 
@@ -252,13 +251,10 @@ with DAG(
                     device_name   text,
                     last_end_ts   bigint not null
                 );
-
                 alter table etl_meta
                     owner to postgres;
-
                 create index IF NOT EXISTS etl_meta_last_start_ts_index
                     on etl_meta (last_start_ts desc);
-
                 create index IF NOT EXISTS etl_meta_last_end_ts_index
                     on etl_meta (last_end_ts desc);''',
             dag=dag,
@@ -336,11 +332,16 @@ with DAG(
                 select caseid.case_id, caseid.start_ts, caseid.end_ts, track.*
                 into track_per_caseid_type_{{ ds_nodash }}
                 from caseid_start_to_end_{{ ds_nodash }} as caseid
-                join track_per_type_{{ ds_nodash }} as track
-                on caseid.device_id = track.device_id
-                and track.ts between caseid.start_ts and caseid.end_ts;''',
+                    join track_per_type_{{ ds_nodash }} as track
+                    on caseid.device_id = track.device_id
+                    and track.ts between caseid.start_ts and caseid.end_ts;
+                create index track_per_caseid_type_{{ ds_nodash }}_export
+                    on track_per_caseid_type_{{ ds_nodash }}
+                    (device_id, case_id, type, name, format, unit, srate, ts);
+                ''',
             dag=dag,
         )
+
 
         generate_device_case = PostgresOperator(
             task_id='generate_device_case',
@@ -350,11 +351,11 @@ with DAG(
             #         into device_case_{{ ds_nodash }}
             #         from track_per_caseid_type_{{ ds_nodash }}
             #         group by device_id, case_id;''',
-            sql='''drop table if exists device_case_20221023;
-                    select device_id, case_id, min(ts) as start_ts, max(ts) as end_ts
-                    into device_case_20221023
-                    from track_per_caseid_type_20221023
-                    group by device_id, case_id;''',
+            sql=f"drop table if exists device_case_{EUMC_MIG_DATE};"
+                " select device_id, case_id, min(ts) as start_ts, max(ts) as end_ts"
+                f" into device_case_{EUMC_MIG_DATE}"
+                f" from track_per_caseid_type_{EUMC_MIG_DATE}"
+                " group by device_id, case_id;",
             dag=dag,
         )
 
@@ -363,10 +364,12 @@ with DAG(
     with TaskGroup("upload_vital_file", tooltip="Tasks for update upload_vital_file") as upload_vital_file:
         start_export = DummyOperator(task_id="start_export")
 
-        export_vital = PythonOperator(
+        export_vital = PythonOperator.partial(
             task_id='export_vital',
-            python_callable=task_upload_vital_files,
+            python_callable=export_vital_file,
             dag=dag,
+        ).expand(
+            op_args=get_postgres_cases()
         )
 
         start_export >> export_vital
@@ -375,13 +378,18 @@ with DAG(
         update_meta = PostgresOperator(
             task_id='update_meta',
             postgres_conn_id=POSTGRES_CONN_ID,
-            sql='''UPDATE etl_meta em
-                    set last_case_id = d.case_id,
-                    last_start_ts = d.start_ts,
-                    last_end_ts = d.end_ts
-                -- FROM device_case_{{ ds_nodash }} as d
-                FROM device_case_20221023 as d
-                WHERE em.device_id = d.device_id;''',
+            # sql='''UPDATE etl_meta em
+            #         set last_case_id = d.case_id,
+            #         last_start_ts = d.start_ts,
+            #         last_end_ts = d.end_ts
+            #     FROM device_case_{{ ds_nodash }} as d
+            #     WHERE em.device_id = d.device_id;''',
+            sql="UPDATE etl_meta em"
+                " set last_case_id = d.case_id,"
+                " last_start_ts = d.start_ts,"
+                " last_end_ts = d.end_ts"
+                f" FROM device_case_{EUMC_MIG_DATE} as d"
+                " WHERE em.device_id = d.device_id;",
             dag=dag,
         )
 
@@ -391,11 +399,11 @@ with DAG(
             sql='''INSERT INTO  etl_meta(device_id, last_case_id, last_start_ts, last_end_ts, device_name)
                     select device_id, case_id as last_case_id, start_ts as last_start_ts, end_ts as last_end_ts, d.name as device_name
                     from (select device_id, case_id, start_ts, end_ts, rank() OVER (PARTITION BY device_id ORDER BY start_ts DESC) as rk
-                        from device_case_20221023
+                        from device_case_{{ ds_nodash }}
                         where device_id not in (select device_id from etl_meta)
                         group by device_id, case_id, start_ts, end_ts
                         order by device_id, start_ts desc) as dt
-                        join device_20221023 as d on dt.device_id = d.id
+                        join device_{{ ds_nodash }} as d on dt.device_id = d.id
                     where rk = 1;''',
             dag=dag,
         )
@@ -404,7 +412,4 @@ with DAG(
 
     end = DummyOperator(task_id="end")
 
-    # start >> process_etl >> duplicate_tb  >> upload_vital_file >> refresh_meta >> end
-    start >> process_etl >> duplicate_tb  >> refresh_meta >> end
-    # start >> upload_vital_file >> refresh_meta >> end
-
+    start >> process_etl >> duplicate_tb  >> upload_vital_file >> refresh_meta >> end

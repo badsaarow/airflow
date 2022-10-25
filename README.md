@@ -99,4 +99,7 @@ create index etl_meta_last_start_ts_index
 create index etl_meta_last_end_ts_index
     on etl_meta (last_end_ts desc);
 
+create index track_per_caseid_type_20221023_export
+on track_per_caseid_type_20221023 (device_id, case_id, type, name, format, unit, srate, ts);
+
 ```
