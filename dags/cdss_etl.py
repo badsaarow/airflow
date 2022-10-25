@@ -59,6 +59,17 @@ def upload_to_minio(local_file, s3_file):
         logging.error("Credentials not available")
         return False
 
+def get_uploaded():
+    return pd.read_csv('dags/uploaded.txt')
+
+def is_uploaded(str_ts: str):
+    df = get_uploaded()
+    print('upload: ' + str(len(df)))
+    df_uploaded = df.query(f"datetimestring == '{str_ts}'")
+    if df_uploaded is None:
+        return False
+    return True
+
 def export_vital_file(device_id: str, case_id: str):
     logging.warn("export_vital_file  " + device_id + case_id)
 
@@ -97,6 +108,9 @@ def export_vital_file(device_id: str, case_id: str):
     print('start_ts', start_ts)
     ts = datetime.fromtimestamp(int(start_ts)/1000)
     start_str = ts.strftime('%Y%m%d_%H%M%S')
+    if is_uploaded(start_str):
+        print('already uploaded: ' + start_str)
+        return
 
     track_type_rows_pb = trackTypeRows_pb2.TrackTypeRows()
     for (idx, row_series) in df.iterrows():
@@ -153,6 +167,8 @@ def get_device_case_names():
 
 def manual_pb_gen():
     df = get_device_case_names()
+    print('total: ' + str(len(df)))
+
     # [1673 rows x 2 columns]
     arr: np.ndarray = df.to_numpy()
     cases =  list(arr)
@@ -160,6 +176,7 @@ def manual_pb_gen():
     for case in cases:
         if case[0] is  None or case[1] is None:
             continue
+        print('device_id: ' + str(case[0]) + ' case_id: ' + str(case[1]))
         export_vital_file(case[0], case[1])
 
 
@@ -167,11 +184,9 @@ if __name__ == "__main__":
     print('start test')
     # export_vital_file('130bc450-406b-11ed-8f01-cfef1303339c', '007832df11')
     # test_normalize()
+    # print(is_uploaded('20220425_205719'))
     manual_pb_gen()
     print('finish main')
-
-
-
 
 
 def generate_task(**args):
