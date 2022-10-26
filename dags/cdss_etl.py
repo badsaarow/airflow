@@ -347,7 +347,7 @@ with DAG(
             python_callable=export_vital_file,
             dag=dag,
         ).expand(
-            op_args=get_postgres_cases()
+            op_args=get_postgres_cases(EUMC_MIG_DATE)
         )
 
         start_export >> export_vital

@@ -2,11 +2,13 @@
 
 ## Connections
 ```
+airflow db reset
+airflow db init
 airflow connections list
 ```
 
 ```
-airflow connections import connections.yaml
+airflow connections import connections-tb.yaml
 airflow tasks test cdss_etl duplicate_tb.duplicate_device
 
 ```
