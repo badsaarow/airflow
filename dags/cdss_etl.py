@@ -1,25 +1,22 @@
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Any, Dict
 import pandas as pd
 import numpy as np
 import json
-import re
 from array import array
 from pandas import DataFrame
 from airflow.models.dag import DAG
 from airflow.decorators import dag, task
-from airflow.operators.python import get_current_context
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.utils.dates import days_ago
 from airflow.utils.task_group import TaskGroup
-from google.protobuf import json_format
 from minio import Minio
 from minio.error import S3Error
+import trackTypeRows_pb2
 
 ACCESS_KEY = 'ysKyN2stJ0a53uqo'
 SECRET_KEY = 'wRBfUxNBcP5SZTpeNBpehVA85gZjrQba'
@@ -33,7 +30,7 @@ minio_client = Minio(
         secure=False
     )
 
-import trackTypeRows_pb2
+
 
 POSTGRES_CONN_ID = 'postgres-mg-etl'
 PROTO_FILE = 'trackTypeRows.proto'
@@ -49,10 +46,10 @@ def upload_to_minio(local_file, s3_file):
         logging.error(s3_file, ex)
         return False
 
-def get_uploaded():
+def get_uploaded() -> DataFrame:
     return pd.read_csv('dags/uploaded.txt')
 
-def is_uploaded(str_ts: str):
+def is_uploaded(str_ts: str) -> bool:
     df = get_uploaded()
     print('upload: ' + str(len(df)))
     df_uploaded = df.query(f"datetimestring == '{str_ts}'")
@@ -213,7 +210,7 @@ with DAG(
     tags=["cdss"]
 ) as dag:
 
-    start = DummyOperator(task_id="start")
+    start = EmptyOperator(task_id="start")
 
     with TaskGroup("duplicate_tb", tooltip="Tasks for duplicate") as duplicate_tb:
         create_etl_meta = PostgresOperator(
@@ -340,7 +337,7 @@ with DAG(
         generate_raw_track >> generate_caseid_start_to_end >> generate_track_per_type >> generate_track_per_caseid_type
 
     with TaskGroup("upload_vital_file", tooltip="Tasks for update upload_vital_file") as upload_vital_file:
-        start_export = DummyOperator(task_id="start_export")
+        start_export = EmptyOperator(task_id="start_export")
 
         export_vital = PythonOperator.partial(
             task_id='export_vital',
@@ -388,6 +385,6 @@ with DAG(
 
         update_meta >> insert_meta
 
-    end = DummyOperator(task_id="end")
+    end = EmptyOperator(task_id="end")
 
     start >> process_etl >> duplicate_tb  >> upload_vital_file >> refresh_meta >> end
