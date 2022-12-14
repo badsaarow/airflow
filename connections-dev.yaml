@@ -1,0 +1,19 @@
+# airflow connections import connections.yaml
+postgres-mg-etl:
+  conn_type: postgres
+  description: for annotation
+  extra: ''
+  host: cdss-ztdev.huinnoaim.com
+  login: postgres
+  password: cdss1234
+  port: 44443
+  schema: tb_ext
+postgres-mg-tb:
+  conn_type: postgres
+  description: thingsboard db
+  extra: ''
+  host: cdss-ztdev.huinnoaim.com
+  login: postgres
+  password: postgres
+  port: 44444
+  schema: thingsboard

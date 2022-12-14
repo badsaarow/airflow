@@ -8,7 +8,7 @@ airflow connections list
 ```
 
 ```
-airflow connections import connections-tb.yaml
+airflow connections import connections-dev.yaml
 airflow tasks test cdss_etl duplicate_tb.duplicate_device
 
 ```

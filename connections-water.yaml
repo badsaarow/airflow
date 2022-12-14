@@ -1,0 +1,19 @@
+# airflow connections import connections-water.yaml
+postgres-gt-etl:
+  conn_type: postgres
+  description: for chart
+  extra: ''
+  host: dev.vpn.casfend.kro.kr
+  login: postgres
+  password: postgres
+  port: 5432
+  schema: tb_ext
+postgres-gt-tb:
+  conn_type: postgres
+  description: thingsboard db
+  extra: ''
+  host: dev.vpn.casfend.kro.kr
+  login: postgres
+  password: postgres
+  port: 5432
+  schema: thingsboard
