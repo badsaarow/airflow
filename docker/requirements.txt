@@ -144,7 +144,7 @@ vine==5.0.0
 virtualenv==20.16.5
 wcwidth==0.2.5
 websocket-client==1.4.1
-Werkzeug==2.2.2
+Werkzeug==2.2.3
 wrapt==1.14.1
 WTForms==2.3.3
 zipp==3.8.1
